@@ -11,6 +11,7 @@ import {
 import { CfnOutput, Stack, type StackProps } from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 
 /**
  * Harness deployment config: role-scoped fields (for IAM role + container build)
@@ -62,6 +63,12 @@ export interface AgentCoreStackProps extends StackProps {
    * Payment specifications with resolved credential provider ARNs.
    */
   paymentSpec?: PaymentSpec[];
+  /**
+   * Name of the agent (key in AgentCoreProjectSpec.agents / this.application.environments)
+   * whose runtime ARN should be exposed as `primaryAgentRuntimeArn` for downstream stacks
+   * (e.g. WebhookStack). If omitted, the first environment found is used.
+   */
+  primaryAgentName?: string;
 }
 
 function toCdkId(name: string): string {
@@ -94,10 +101,23 @@ export class AgentCoreStack extends Stack {
   /** The AgentCore application containing all agent environments */
   public readonly application: AgentCoreApplication;
 
+  /** ARN of the AgentCore runtime consumed by downstream stacks (e.g. WebhookStack) */
+  public readonly primaryAgentRuntimeArn: string;
+
   constructor(scope: Construct, id: string, props: AgentCoreStackProps) {
     super(scope, id, props);
 
-    const { spec, mcpSpec, credentials, harnesses, connectorParametersByFile, paymentSpec } = props;
+    const geminiApiKey = ssm.StringParameter.valueForStringParameter(
+      this, '/financemanager2/gemini/api-key'
+    );
+    const awsAccessKeyId = ssm.StringParameter.valueForStringParameter(
+      this, '/financemanager2/aws/access-key-id'
+    );
+    const awsSecretAccessKey = ssm.StringParameter.valueForStringParameter(
+      this, '/financemanager2/aws/secret-access-key'
+    );
+
+    const { spec, mcpSpec, credentials, harnesses, connectorParametersByFile, paymentSpec, primaryAgentName } = props;
 
     // Create AgentCoreApplication with all agents and harness roles
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -112,6 +132,46 @@ export class AgentCoreStack extends Stack {
       appProps.credentials = credentials;
     }
     this.application = new AgentCoreApplication(this, 'Application', appProps as any);
+
+    // Resolve the runtime ARN for the agent the webhook Lambda needs to invoke.
+    // If primaryAgentName is given, look it up by key; otherwise fall back to
+    // the first environment found (fine for single-agent projects).
+    const targetEnv = primaryAgentName
+      ? this.application.environments.get(primaryAgentName)
+      : this.application.environments.values().next().value;
+
+    if (!targetEnv) {
+      throw new Error(
+        primaryAgentName
+          ? `Expected agent environment "${primaryAgentName}" not found in application spec`
+          : 'No agent environments found in AgentCoreApplication'
+      );
+    }
+    targetEnv.runtime.addEnvironmentVariable('GEMINI_API_KEY', geminiApiKey);
+    targetEnv.runtime.addEnvironmentVariable('AWS_ACCESS_KEY_ID', awsAccessKeyId);
+    targetEnv.runtime.addEnvironmentVariable('AWS_SECRET_ACCESS_KEY', awsSecretAccessKey);
+    targetEnv.runtime.addEnvironmentVariable('AWS_DEFAULT_REGION', this.region);
+    targetEnv.runtime.addEnvironmentVariable('DYNAMO_DB_TABLE', 'ServiceProxyStack-ServiceProxyTable6140DF65-1G6T7NMZ4F8VT')
+    targetEnv.runtime.role.addToPrincipalPolicy(
+                                                  new iam.PolicyStatement({
+                                                    actions: [
+                                                      'dynamodb:PutItem',
+                                                      'dynamodb:GetItem',
+                                                      'dynamodb:UpdateItem',
+                                                      'dynamodb:Query',
+                                                      'dynamodb:DeleteItem',
+                                                    ],
+                                                    resources: [
+                                                      '*',
+                                                    ],
+                                                  })
+                                                );
+
+    // NOTE: confirm this property name against your installed @aws/agentcore-cdk
+    // typings, e.g.:
+    //   grep -rn "runtimeArn\|agentRuntimeArn\|RuntimeArn" node_modules/@aws/agentcore-cdk/lib/*.d.ts
+    // Swap `.runtimeArn` below for the correct property if it differs.
+    this.primaryAgentRuntimeArn = targetEnv.runtime.runtimeArn;
 
     // Create AgentCoreMcp if there are gateways configured
     if (mcpSpec?.agentCoreGateways && mcpSpec.agentCoreGateways.length > 0) {
@@ -244,6 +304,13 @@ export class AgentCoreStack extends Stack {
     new CfnOutput(this, 'StackNameOutput', {
       description: 'Name of the CloudFormation Stack',
       value: this.stackName,
+    });
+
+    // AgentCore Runtime ARN — consumed by WebhookStack for InvokeAgentRuntime
+    new CfnOutput(this, 'PrimaryAgentRuntimeArn', {
+      description: 'ARN of the AgentCore runtime the Telegram webhook Lambda invokes',
+      value: this.primaryAgentRuntimeArn,
+      exportName: 'FinanceManager2-AgentRuntimeArn',
     });
   }
 }

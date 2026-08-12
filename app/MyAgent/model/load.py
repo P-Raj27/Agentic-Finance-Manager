@@ -31,6 +31,6 @@ def _get_api_key() -> str:
 def load_model() -> GeminiModel:
     """Get authenticated Gemini model client."""
     return GeminiModel(
-        client_args={"api_key": _get_api_key()},
-        model_id="gemini-2.5-flash",
+        client_args={"api_key": os.getenv("GEMINI_API_KEY")},
+        model_id="gemini-3.5-flash-lite",
     )

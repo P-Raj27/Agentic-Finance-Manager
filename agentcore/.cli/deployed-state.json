@@ -1,3 +1,23 @@
 {
-  "targets": {}
+  "targets": {
+    "default": {
+      "resources": {
+        "runtimes": {
+          "MyAgent": {
+            "runtimeId": "FinanceManager2_MyAgent-dnWLBy6yct",
+            "runtimeArn": "arn:aws:bedrock-agentcore:us-east-1:599942835003:runtime/FinanceManager2_MyAgent-dnWLBy6yct",
+            "roleArn": "arn:aws:iam::599942835003:role/AgentCore-FinanceManager2-ApplicationAgentMyAgentRu-Jmx0hPyb9fwD"
+          }
+        },
+        "memories": {
+          "MyAgentMemory": {
+            "memoryId": "FinanceManager2_MyAgentMemory-VXvXJI4OMH",
+            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:599942835003:memory/FinanceManager2_MyAgentMemory-VXvXJI4OMH"
+          }
+        },
+        "stackName": "AgentCore-FinanceManager2-default",
+        "deployHash": "2ce4cef772a1b077"
+      }
+    }
+  }
 }

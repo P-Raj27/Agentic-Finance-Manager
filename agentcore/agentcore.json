@@ -21,7 +21,7 @@
   "memories": [
     {
       "name": "MyAgentMemory",
-      "eventExpiryDuration": 30,
+      "eventExpiryDuration": 29,
       "strategies": []
     }
   ],
