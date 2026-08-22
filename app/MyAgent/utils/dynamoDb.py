@@ -23,6 +23,7 @@ class DynamoDBHelper:
     region_name='us-east-1',
 )
         self.table = self.dynamodb.Table(table_name)
+        self.client = boto3.client('dynamodb', region_name='us-east-1')
 
     def put_item(self, item: Dict[str, Any]) -> bool:
         """
@@ -190,4 +191,34 @@ class DynamoDBHelper:
             return items
         except ClientError as e:
             logger.error(f"Error scanning {self.table_name}: {e.response['Error']['Message']}")
+            return []
+
+    def vector_search(self, item: Dict[str, Any]):
+        '''
+        Performs Vector search on the records stored in dynamodb.
+        '''
+        try:
+            response = self.client.search_vectors(
+                TableName=self.table_name,
+                IndexName=item.indexName,
+                SearchVector=[{'N': str(v)} for v in item.vectors],
+                TopK=item.limit,
+                SearchConditionExpression='#pk = :pk_val',
+                ExpressionAttributeNames={
+                    '#pk': 'PK'
+                },
+                ExpressionAttributeValues={
+                    ':pk_val': {'S': item.user_id}
+                }
+            )
+            results = response.get('SearchResults', [])
+            for record in results:
+                result_item = record.get('Item', {})
+                similarity_score = record.get('SimilarityScore')
+                logger.info(f"Item ID: {result_item.get('ProductId', {}).get('S')}")
+                logger.info(f"Similarity Score: {similarity_score}")
+
+            return results
+        except ClientError as e:
+            logger.error(f"Vector search error in {self.table_name}: {e.response['Error']['Message']}")
             return []

@@ -1,5 +1,5 @@
 from strands import Agent, tool
-from tools.dynamo_db_tools import put_expense_to_ddb,get_subcategory_from_category,category_map,put_income_to_ddb,fetch_records,fetch_monthly_summary_records
+from tools.dynamo_db_tools import put_expense_to_ddb,get_subcategory_from_category,category_map,put_income_to_ddb,fetch_records,fetch_monthly_summary_records,fetch_by_vector_search
 from model.load import load_model
 
 intents = [
@@ -84,7 +84,7 @@ def fetch_records_agent(intent: str, query:str) -> str:
             2. You have to analye the query and call the most optimal tool for the query to get the records and respond to user
             3. Params are user_id,start_date_end_date
             4. For month summary you have to fetch the Monthly Summary records""",
-            tools=[fetch_records,fetch_monthly_summary_records]
+            tools=[fetch_records,fetch_monthly_summary_records,fetch_by_vector_search]
         )
     response = records_fetch_agent(f"Intent: {intent}, Query: {query}")
     return str(response)

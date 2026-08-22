@@ -114,8 +114,11 @@ async def invoke(payload, context):
 
     import os, sys
 
-    print("=== /var/task top-level ===")
-    print(os.listdir("/var/task"))
+    task_dir = "/var/task"
+    if os.path.isdir(task_dir):
+        print(os.listdir(task_dir))
+    else:
+        print(f"Skipping /var/task listing (not running in Lambda/AgentCore container)")
 
     for root, dirs, files in os.walk("/var/task"):
         # skip noisy dependency folders so the output stays readable

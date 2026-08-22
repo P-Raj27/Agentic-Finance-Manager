@@ -4,15 +4,15 @@
       "resources": {
         "runtimes": {
           "MyAgent": {
-            "runtimeId": "FinanceManager2_MyAgent-dnWLBy6yct",
-            "runtimeArn": "arn:aws:bedrock-agentcore:us-east-1:599942835003:runtime/FinanceManager2_MyAgent-dnWLBy6yct",
-            "roleArn": "arn:aws:iam::599942835003:role/AgentCore-FinanceManager2-ApplicationAgentMyAgentRu-Jmx0hPyb9fwD"
+            "runtimeId": "FinanceManager2_MyAgent-lvDolQHFpd",
+            "runtimeArn": "arn:aws:bedrock-agentcore:us-east-1:599942835003:runtime/FinanceManager2_MyAgent-lvDolQHFpd",
+            "roleArn": "arn:aws:iam::599942835003:role/AgentCore-FinanceManager2-ApplicationAgentMyAgentRu-ACTYOOXDTHHA"
           }
         },
         "memories": {
           "MyAgentMemory": {
-            "memoryId": "FinanceManager2_MyAgentMemory-VXvXJI4OMH",
-            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:599942835003:memory/FinanceManager2_MyAgentMemory-VXvXJI4OMH"
+            "memoryId": "FinanceManager2_MyAgentMemory-lheQNyD8y3",
+            "memoryArn": "arn:aws:bedrock-agentcore:us-east-1:599942835003:memory/FinanceManager2_MyAgentMemory-lheQNyD8y3"
           }
         },
         "stackName": "AgentCore-FinanceManager2-default",

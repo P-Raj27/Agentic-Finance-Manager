@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from utils.dynamoDb import DynamoDBHelper
 from strands import Agent, tool
 from datetime import datetime
@@ -11,6 +13,8 @@ from decimal import Decimal
 from botocore.exceptions import ClientError
 import os
 from logger_config import app, log
+from google import genai
+from google.genai import types
 
 
 category_map = {
@@ -100,10 +104,10 @@ category_map = {
   ],
   "RECHARGE": [
     "Mobile Prepaid",
-    "DTH",
+    "WIFI",
     "Metro Card",
     "Broadband",
-    "Toll FASTag"
+    "Toll FASTag",
   ],
   "ON_GUESTS": [
     "Food & Drinks",
@@ -194,10 +198,6 @@ def get_subcategory_from_category(category):
       category map.
   """
   return category_map[category]
-
-
-
-
 
 def update_monthly_summary(
     db,
@@ -302,6 +302,13 @@ def put_expense_to_ddb(user_id: str,transactionId:str,category: str, sub_categor
         except ValueError as e:
             return f"Failed to parse date/time for expense record: date={date}, time={time}, error={e}"
 
+
+        to_embed_string = f"Category: {category}, SubCategory: {sub_category}, Description: {description}"
+
+        descriptionEmbedding = generate_embedding(to_embed_string)
+        if (descriptionEmbedding):
+            log.info(f"unable to generate embedding for description")
+
         item = {
             "PK": user_id,
             "SK": f"TXN#{iso_timestamp}",
@@ -313,7 +320,8 @@ def put_expense_to_ddb(user_id: str,transactionId:str,category: str, sub_categor
             "spendType": spendType,
             "timeStamp": iso_timestamp,
             "transactionId": transactionId,
-            "description": description
+            "description": description,
+            "descriptionEmbedding": descriptionEmbedding
         }
 
         create_expense_record_response = db.put_item(item)
@@ -341,10 +349,6 @@ def put_expense_to_ddb(user_id: str,transactionId:str,category: str, sub_categor
         return f"Failed to parse date '{date}' for expense record (transactionId={transactionId}): {e}"
     except Exception as e:
         return f"Unexpected error saving expense (transactionId={transactionId}): {e}"
-
-
-
-
 @tool
 def put_income_to_ddb(user_id: str,transactionId:str,category: str, sub_category: str, amount: int, date: str, incomeType: str, description: str,time: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")):
     """
@@ -366,6 +370,10 @@ def put_income_to_ddb(user_id: str,transactionId:str,category: str, sub_category
     """
     transactionId = str(uuid.uuid7())
 
+    descriptionEmbedding = generate_embedding(description)
+    if (type(descriptionEmbedding) is not list):
+        log.info(f"unable to generate embedding for description")
+
     item = {
         "PK": user_id,
         "SK": f"TXN#{convert_to_iso(date,time)}",
@@ -377,7 +385,8 @@ def put_income_to_ddb(user_id: str,transactionId:str,category: str, sub_category
         "incomeType": incomeType,
         "timeStamp": convert_to_iso(date,time),
         "transactionId": transactionId,
-        "description": description
+        "description": description,
+        "descriptionEmbedding": descriptionEmbedding
     }
     create_expense_record_response = db.put_item(item)
     print("Expense Record Create=",create_expense_record_response)
@@ -390,7 +399,6 @@ def put_income_to_ddb(user_id: str,transactionId:str,category: str, sub_category
         return "Data Saved in DDB"
     else:
         return "Unable to Save Data"
-
 @tool
 def fetch_records(
     user_id: str,
@@ -448,7 +456,6 @@ def fetch_records(
         "transaction_count": len(items),
         "transactions": items,
     }
-
 @tool
 def fetch_monthly_summary_records(
     user_id: str,
@@ -498,6 +505,46 @@ def fetch_monthly_summary_records(
         "transaction_count": len(items),
         "transactions": items,
     }
+
+@tool
+def fetch_by_vector_search(
+    user_id: str,
+    description: str
+):
+    """
+    Vector-searches a user's transactions by natural-language description (e.g. "spending
+    on eating out"). Use for descriptive/category spend queries, not exact filters.
+
+    Args:
+        user_id: User's chat_id / partition key.
+        description: Natural-language expense category to search for.
+
+    Returns:
+        List of matching transaction records (with similarity scores) for the caller to
+        aggregate, or an error string if the search fails.
+    """
+    embedding_vector = generate_embedding(description)
+
+    search_item = SimpleNamespace(
+        user_id=user_id,
+        indexName="description",
+        vectors=embedding_vector,
+        limit=10
+    )
+    import boto3, botocore, sys
+    ops = boto3.client('dynamodb', region_name='us-east-1').meta.service_model.operation_names
+    return db.vector_search(search_item)
+
+def generate_embedding(text: str):
+
+    client = genai.Client()
+    result = client.models.embed_content(
+        model="gemini-embedding-2",
+        contents=text,
+        config=types.EmbedContentConfig(output_dimensionality=1024)
+    )
+    values = result.embeddings[0].values
+    return [Decimal(str(v)) for v in values]
 
 if __name__=="__main__":
 
