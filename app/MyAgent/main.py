@@ -54,7 +54,7 @@ def agent_factory():
         if key not in cache:
             cache[key] = Agent(
                 model=load_model(),
-                session_manager=get_memory_session_manager(session_id, _actor_id),
+                # session_manager=get_memory_session_manager(session_id, _actor_id),
                 conversation_manager=_make_conversation_manager(),
                 system_prompt=DEFAULT_SYSTEM_PROMPT,
                 tools=tools,

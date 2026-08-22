@@ -23,6 +23,7 @@ test('AgentCoreStack synthesizes with empty spec', () => {
       datasets: [],
       knowledgeBases: [],
     },
+    dynamoTableName: 'test-table',
   });
   const template = Template.fromStack(stack);
   template.hasOutput('StackNameOutput', {
