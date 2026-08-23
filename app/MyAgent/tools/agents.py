@@ -1,11 +1,13 @@
 from strands import Agent, tool
-from tools.dynamo_db_tools import put_expense_to_ddb,get_subcategory_from_category,category_map,put_income_to_ddb,fetch_records,fetch_monthly_summary_records,fetch_by_vector_search
+from tools.dynamo_db_tools import put_expense_to_ddb,get_subcategory_from_category,put_income_to_ddb,fetch_records,fetch_monthly_summary_records,fetch_by_vector_search
 from model.load import load_model
+from tools.categories import category_map
 
 intents = [
     "RECORD_EXPENSE",
     "RECORD_INCOME",
-    "FETCH_RECORDS"
+    "FETCH_RECORDS",
+    "SIMILARITY_SEARCH"
 ]
 
 
@@ -65,7 +67,7 @@ def fetch_records_agent(intent: str, query:str) -> str:
     """
     Acts as a record fetcher to handle fetching of records as per the user query.
         Use this tool when you need to get the dynamo db records.
-        This tool to be called when the intent is FETCH_RECORDS
+        This tool to be called when the intent is FETCH_RECORDS or SIMILARITY_SEARCH
     
         Parameters:
         - intent (str): The intent category determined by the intent finder.

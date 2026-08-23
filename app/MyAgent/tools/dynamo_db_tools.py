@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from tools.categories import category_map
 
 from utils.dynamoDb import DynamoDBHelper
 from strands import Agent, tool
@@ -16,155 +17,6 @@ from logger_config import app, log
 from google import genai
 from google.genai import types
 
-
-category_map = {
-  "EATING_OUT": [
-    "Family Dining",
-    "Street Food",
-    "Beverages",
-    "Solo Dining",
-    "Home Delivery"
-  ],
-  "SHOPPING": [
-    "Clothing",
-    "Groceries",
-    "Shoes",
-    "Accessories",
-    "Home Goods"
-  ],
-  "TRANSIT": [
-    "Bus",
-    "Train",
-    "Taxi",
-    "Subway",
-    "Ferry"
-  ],
-  "ENTERTAINMENT": [
-    "Movies",
-    "Concerts",
-    "Games",
-    "Books",
-    "Events"
-  ],
-  "BILLS_AND_FEES": [
-    "Electricity",
-    "Water",
-    "Internet",
-    "Bank Fees",
-    "Late Fees"
-  ],
-  "GIFTS": [
-    "Birthday",
-    "Anniversary",
-    "Wedding",
-    "Charity",
-    "Festivals"
-  ],
-  "BEAUTY": [
-    "Haircut",
-    "Skincare",
-    "Makeup",
-    "Spa",
-    "Cosmetics"
-  ],
-  "WORK": [
-    "Office Supplies",
-    "Meals",
-    "Commute",
-    "Equipment",
-    "Software"
-  ],
-  "TRAVEL": [
-    "Flights",
-    "Hotels",
-    "Visas",
-    "Travel Insurance",
-    "Souvenirs"
-  ],
-  "INCOME": [
-    "Salary",
-    "Freelance",
-    "Dividends",
-    "Interest",
-    "Rental Income"
-  ],
-  "HOUSEHOLD": [
-    "Rent",
-    "Maintenance",
-    "Cleaning Supplies",
-    "Furniture",
-    "Decor"
-  ],
-  "FUN_LIFE": [
-    "Hobbies",
-    "Nightlife",
-    "Amusement Parks",
-    "Parties",
-    "Sports"
-  ],
-  "RECHARGE": [
-    "Mobile Prepaid",
-    "WIFI",
-    "Metro Card",
-    "Broadband",
-    "Toll FASTag",
-  ],
-  "ON_GUESTS": [
-    "Food & Drinks",
-    "Entertainment",
-    "Gifts",
-    "Transport",
-    "Accommodation"
-  ],
-  "ELECTRONICS": [
-    "Mobiles",
-    "Laptops",
-    "Accessories",
-    "Appliances",
-    "Repairs"
-  ],
-  "VEHICLES": [
-    "Fuel",
-    "Maintenance",
-    "Insurance",
-    "Parking",
-    "Wash"
-  ],
-  "SUBSCRIPTION": [
-    "Streaming Services",
-    "Gym",
-    "Magazines",
-    "Software",
-    "Cloud Storage"
-  ],
-  "MISC": [
-    "Uncategorized",
-    "Petty Cash",
-    "Donations",
-    "Fines",
-    "Lost Money"
-  ],
-  "BALANCE_CORRECTION": [
-    "Adjustment",
-    "Reconciliation",
-    "Missing Funds",
-    "Found Money"
-  ],
-  "HEALTH": [
-    "Doctor",
-    "Medicines",
-    "Insurance",
-    "Lab Tests",
-    "Therapy"
-  ],
-  "TRIPS": [
-    "Vacation",
-    "Weekend Getaway",
-    "Business Trip",
-    "Road Trip",
-    "Camping"
-  ]
-}
    
 db = DynamoDBHelper(table_name=os.getenv("DYNAMO_DB_TABLE"), region_name=os.getenv("AWS_DEFAULT_REGION"))
 
@@ -204,6 +56,7 @@ def update_monthly_summary(
     user_id: str,
     month: int,
     year: int,
+    category,
     spend_amount=0,
     income_amount=0,
     idempotency_key: str = None,
@@ -213,6 +66,8 @@ def update_monthly_summary(
     month/year: ints, so callers can't pass inconsistent formatting
     idempotency_key: unique id for the transaction being applied
                       (e.g. transaction_id) - required to prevent double-counting
+    category: if provided and spend_amount != 0, also increments a
+              per-category running total under categorySpend[category]
     """
     # Defensive cast: protects every caller, even ones that pass strings
     # (e.g. from date.split("-")[n]) without casting themselves.
@@ -236,30 +91,49 @@ def update_monthly_summary(
     spend_val = Decimal(str(spend_amount))
     income_val = Decimal(str(income_amount))
 
-    update_expression = (
-        "SET #spend = if_not_exists(#spend, :zero) + :spend_val, "
-        "#income = if_not_exists(#income, :zero) + :income_val"
-    )
-    expr_names = {"#spend": "totalSpend", "#income": "totalIncome"}
-    expr_values = {
-        ":spend_val": spend_val,
-        ":income_val": income_val,
-        ":zero": Decimal(0),
-    }
+    track_category = bool(category) and spend_val != 0
 
-    # Idempotency: track applied transaction ids on the item itself,
-    # and fail the write if this one's already been applied.
-    if idempotency_key:
-        update_expression += ", #applied = list_append(if_not_exists(#applied, :empty_list), :new_key)"
-        expr_names["#applied"] = "appliedTxnIds"
-        expr_values[":empty_list"] = []
-        expr_values[":new_key"] = [idempotency_key]
-        condition_expression = "attribute_not_exists(#applied) OR not contains(#applied, :idem_check)"
-        expr_values[":idem_check"] = idempotency_key
-    else:
+    def _build_kwargs(init_category_map: bool):
+        update_expression = (
+            "SET #spend = if_not_exists(#spend, :zero) + :spend_val, "
+            "#income = if_not_exists(#income, :zero) + :income_val"
+        )
+        expr_names = {"#spend": "totalSpend", "#income": "totalIncome"}
+        expr_values = {
+            ":spend_val": spend_val,
+            ":income_val": income_val,
+            ":zero": Decimal(0),
+        }
+
+        if track_category:
+            expr_names["#catSpend"] = "categorySpend"
+            if init_category_map:
+                # First-touch only: creates the map so the nested path below
+                # becomes valid. Guarded by attribute_not_exists in the
+                # condition so it never clobbers an existing map.
+                update_expression += ", #catSpend = if_not_exists(#catSpend, :empty_map)"
+                expr_values[":empty_map"] = {}
+            else:
+                expr_names["#cat"] = category
+                update_expression += (
+                    ", #catSpend.#cat = if_not_exists(#catSpend.#cat, :zero) + :spend_val"
+                )
+
+        # Idempotency: track applied transaction ids on the item itself,
+        # and fail the write if this one's already been applied.
         condition_expression = None
+        if idempotency_key and not init_category_map:
+            update_expression += ", #applied = list_append(if_not_exists(#applied, :empty_list), :new_key)"
+            expr_names["#applied"] = "appliedTxnIds"
+            expr_values[":empty_list"] = []
+            expr_values[":new_key"] = [idempotency_key]
+            condition_expression = "attribute_not_exists(#applied) OR not contains(#applied, :idem_check)"
+            expr_values[":idem_check"] = idempotency_key
+        elif init_category_map:
+            # Init-only call: don't touch totals/idempotency, just make
+            # sure we don't race-clobber a map another writer just created.
+            condition_expression = "attribute_not_exists(#catSpend)"
 
-    try:
         kwargs = dict(
             key={"PK": user_id, "SK": sk},
             update_expression=update_expression,
@@ -268,12 +142,35 @@ def update_monthly_summary(
         )
         if condition_expression:
             kwargs["condition_expression"] = condition_expression
+        return kwargs
 
-        return db.update_item(**kwargs)
+    try:
+        return db.update_item(**_build_kwargs(init_category_map=False))
 
     except ClientError as e:
-        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+        code = e.response["Error"]["Code"]
+
+        if code == "ConditionalCheckFailedException":
             return None
+
+        if track_category and code == "ValidationException" and "document path" in str(e):
+            # categorySpend map didn't exist yet - initialize it, then
+            # retry the real update. If another writer beat us to the
+            # init (ConditionalCheckFailed on attribute_not_exists),
+            # that's fine, just proceed to retry.
+            try:
+                db.update_item(**_build_kwargs(init_category_map=True))
+            except ClientError as init_err:
+                if init_err.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                    raise
+
+            try:
+                return db.update_item(**_build_kwargs(init_category_map=False))
+            except ClientError as retry_err:
+                if retry_err.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                    return None
+                raise
+
         raise
 @tool
 def put_expense_to_ddb(user_id: str,transactionId:str,category: str, sub_category: str, amount: int, date: str, spendType: str, description:str ,time: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")):
@@ -333,6 +230,7 @@ def put_expense_to_ddb(user_id: str,transactionId:str,category: str, sub_categor
             user_id,
             month,
             year,
+            category,
             spend_amount=amount,
             idempotency_key=transactionId
         )
@@ -370,7 +268,9 @@ def put_income_to_ddb(user_id: str,transactionId:str,category: str, sub_category
     """
     transactionId = str(uuid.uuid7())
 
-    descriptionEmbedding = generate_embedding(description)
+    to_embed_string = f"Category: {category}, SubCategory: {sub_category}, Description: {description}"
+    
+    descriptionEmbedding = generate_embedding(to_embed_string)
     if (type(descriptionEmbedding) is not list):
         log.info(f"unable to generate embedding for description")
 
